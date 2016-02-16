@@ -1,0 +1,321 @@
+#!/usr/bin/python3
+
+# ToDo:
+# - Zoom
+# - popover for open, gedit-like document selector
+# - Drag and drop 
+# - fancy statusbar (like gedit)
+# - keyboard shortcuts
+# - loading pdf: headerbar progressbar, spinning wheel
+# - selection mode, special header bar
+# - css transision element pop-in, ease-in
+
+# yaourt -S python-cairo python-pypdf2
+
+# need a document class!!!
+document_properties = {'filename': '',
+		       'location': '',
+		       'orig_page_count' : ''}
+pages = [ {'index': '',
+	   'pagenum': '',
+	   'crop': '',
+	   'rotate': '',
+	   'enhance': '',
+	   'delete': '',
+	   'scale': ''} ]
+
+from threading import Thread	
+import PyPDF2 as pypdf
+from gi.repository import Gtk, Gio, GdkPixbuf, Gdk, Poppler, GLib
+from gi.repository.GdkPixbuf import Pixbuf
+import os, sys
+import cairo
+import time
+from src.document import document
+
+class GUI:
+
+	def __init__(self):
+
+		self.window = Gtk.Window()
+		self.window.connect_after('destroy', self.destroy)
+
+		self.hb = Gtk.HeaderBar()
+		self.hb.set_show_close_button(True)
+		self.hb.props.title = "PDFmod 3"
+		self.window.set_titlebar(self.hb)
+		self.window.set_name('MyWindow')
+
+		#cssProviderFile = Gio.File.new_for_uri('file:///home/testosteron/projects/pdfmod3/src/style.css')
+
+		#style_provider = Gtk.CssProvider()
+		#style_provider.load_from_file(cssProviderFile)
+
+		#Gtk.StyleContext.add_provider_for_screen(
+		#    Gdk.Screen.get_default(), 
+		#    style_provider,     
+		#    Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+		#)
+
+
+		#button = Gtk.Button()
+		#icon = Gio.ThemedIcon(name="preferences-system")
+		#image = Gtk.Image.new_from_gicon(icon, Gtk.IconSize.BUTTON)
+		#button.add(image)
+
+		button_back = Gtk.Button()
+		#menubutton.set_direction(4) # instead of image
+		image = Gtk.Image.new_from_gicon(Gio.ThemedIcon(name="go-previous-symbolic"), Gtk.IconSize.BUTTON)
+		button_back.add(image)
+		button_back.connect("clicked", self.switch_workspace)
+		self.hb.pack_start(button_back)
+		
+		menubutton = Gtk.MenuButton()
+		#menubutton.set_direction(4) # instead of image
+		image = Gtk.Image.new_from_gicon(Gio.ThemedIcon(name="view-sidebar-symbolic"), Gtk.IconSize.BUTTON)
+		menubutton.add(image)
+		menu = Gio.Menu()
+		menu.append('Append', 'win.logout')
+		menu.append('Delete', 'win.logout')
+		menu.append('View', 'win.logout')
+		menu.append('Select', 'win.logout')
+		menu.append('Edit', 'win.logout')
+		menu.append('File properties', 'win.logout')
+		menubutton.set_direction(1)
+		menubutton.set_menu_model(menu)
+		menubutton.set_use_popover(True)
+		self.hb.pack_end(menubutton)
+
+		button_done = Gtk.Button()
+		#menubutton.set_direction(4) # instead of image
+		image = Gtk.Image.new_from_gicon(Gio.ThemedIcon(name="object-select-symbolic"), Gtk.IconSize.BUTTON)
+		button_done.add(image)
+		button_done.connect("clicked", self.switch_workspace)
+		self.hb.pack_end(button_done)
+
+		box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+		label = Gtk.Label("Open")
+		box.pack_start(label, True, True, 10)
+		arrow = Gtk.Arrow (Gtk.ArrowType.DOWN, Gtk.ShadowType.ETCHED_IN)
+		#arrow = Gtk.Image.new_from_gicon(Gio.ThemedIcon(name="pan-down-symbolic"), Gtk.IconSize.BUTTON) # icon not available
+		box.pack_start(arrow, True, True, 3)
+		menu_btn = Gtk.Button()
+		menu_btn.add(box)
+		menu_btn.set_direction(1)
+		#menu_btn.set_menu_model(menu)
+		#menu_btn.set_use_popover(True)
+		menu_btn.connect('clicked', self.show_menu)
+
+		self.popover = Gtk.Popover.new(menu_btn)
+		self.popover.set_size_request(300, -1)
+	
+
+		opendocumentbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, margin=5, spacing=5)
+
+		searchentry = Gtk.SearchEntry()
+		opendocumentbox.pack_start(searchentry, True, True, 0)
+
+		self.liststore = Gtk.ListStore(str)
+		self.liststore.append(["Fedora"])
+		self.liststore.append(["Slackware"])
+		self.liststore.append(["Sidux"])
+		treeview = Gtk.TreeView(model=self.liststore, margin=5)
+		treeview.set_headers_visible(False)
+		renderer_text = Gtk.CellRendererText()
+		column_text = Gtk.TreeViewColumn("Text", renderer_text, text=0)
+		treeview.append_column(column_text)
+
+		opendocumentbox.pack_start(treeview, True, True, 0)
+
+		button = Gtk.Button("Other Documents...")
+		button.connect_after('clicked', self.on_open_clicked)
+		opendocumentbox.pack_start(button, True, True, 0)
+
+		self.popover.add(opendocumentbox)
+
+
+		
+
+		self.hb.pack_start(menu_btn)
+
+		self.window.set_default_size(800, 600)
+
+		self.sidebarbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+		toplevelbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL) # , spacing=0
+
+		self.window.add(toplevelbox)
+
+		toplevelbox.pack_start(self.sidebarbox, False, False, 0)
+
+        #self.listbox = Gtk.ListBox()
+        #self.listbox.get_style_context().add_class("tweak-categories")
+        #self.listbox.set_size_request(200,-1)
+        #self.listbox.connect("row-selected", self._on_select_row)
+        #self.listbox.set_header_func(self._list_header_func, None)
+
+		liststore = Gtk.ListStore(str, str)
+		liststore.append(["Rotate", Gtk.STOCK_REFRESH])
+		liststore.append(["Crop", Gtk.STOCK_CUT])
+		liststore.append(["Resize", Gtk.STOCK_PAGE_SETUP])
+		liststore.append(["Enhance", Gtk.STOCK_CLEAR])
+
+		treeview = Gtk.TreeView(model=liststore)
+		treeview.set_headers_visible(False)
+		treeview.set_grid_lines(1)
+
+		renderer_pixbuf = Gtk.CellRendererPixbuf()
+		renderer_pixbuf.set_padding(15,15)
+		column_pixbuf = Gtk.TreeViewColumn("", renderer_pixbuf, stock_id=1)
+		treeview.append_column(column_pixbuf)
+
+		renderer_text = Gtk.CellRendererText()
+		renderer_text.set_padding(20,0)
+		column_text = Gtk.TreeViewColumn("", renderer_text, text=0)
+		treeview.append_column(column_text)
+
+
+		self.sidebarbox.pack_start(treeview, True, True, 0)
+
+		overlay = Gtk.Overlay()
+		scrolled_win = Gtk.ScrolledWindow()
+		#scrolled_win.set_policy(Gtk.POLICY_AUTOMATIC, Gtk.POLICY_AUTOMATIC)
+		self.liststore = Gtk.ListStore(Pixbuf, str)
+		self.iconview = Gtk.IconView.new()
+		self.iconview.set_name('document_view')
+		self.iconview.set_model(self.liststore)
+		self.iconview.set_pixbuf_column(0)
+		self.iconview.set_reorderable(True)
+		self.iconview.set_selection_mode(3)
+		self.iconview.connect("button_press_event", self.on_double_click)
+
+		scrolled_win.add(self.iconview)
+		#box.pack_start (scrolled_win, True, True, 0)
+		overlay.add(scrolled_win)
+
+		self.spinnerbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+		spinner = Gtk.Spinner()
+		spinner.start()
+		self.spinnerbox.pack_start(spinner, True, True, 50)
+
+
+		#self.spinner.set_valign(Gtk.Align.CENTER)
+		#self.spinner.set_halign(Gtk.Align.CENTER)
+		overlay.add_overlay(self.spinnerbox)
+
+		overlay.show_all()
+
+		toplevelbox.pack_start(overlay, True, True, 0)
+
+		#statusbar = Gtk.Statusbar()
+		#context = statusbar.get_context_id("example")
+		#box.pack_start (statusbar, False, False, 0)
+		#statusbar.push(context, "Test")
+
+		self.window.show_all()
+		self.sidebarbox.hide()
+		self.spinnerbox.hide()
+		button_done.hide()
+		button_back.hide()
+
+	def destroy(window, self):
+		Gtk.main_quit()
+
+	def show_menu(self, widget):
+		if self.popover.get_visible():
+			self.popover.hide()
+		else:
+			self.popover.show_all()
+
+	def switch_workspace(self, bla):
+			if self.sidebarbox.get_visible():
+				self.sidebarbox.hide()
+				self.hb.props.title = self.current_document.document_get_name()
+				self.hb.set_subtitle(self.current_document.document_get_directory())
+				self.hb.set_show_close_button(True)
+				for child in self.hb.get_children():
+					child.show()
+				self.hb.get_children()[0].hide()
+				self.hb.get_children()[3].hide()
+			else:
+				self.sidebarbox.show()
+				self.hb.set_show_close_button(False)
+				for child in self.hb.get_children():
+					child.hide()
+				self.hb.get_children()[0].show()
+				self.hb.get_children()[3].show()
+				self.hb.props.title = "Page 1 / 20"
+				self.hb.set_subtitle("")
+
+	def on_double_click(self, obj, event):
+		if event.type == Gdk.EventType._2BUTTON_PRESS:
+			if self.sidebarbox.get_visible():
+				self.sidebarbox.hide()
+				self.hb.props.title = self.current_document.document_get_name()
+				self.hb.set_subtitle(self.current_document.document_get_directory())
+				self.hb.set_show_close_button(True)
+				for child in self.hb.get_children():
+					child.show()
+				self.hb.get_children()[0].hide()
+				self.hb.get_children()[3].hide()
+			else:
+				self.sidebarbox.show()
+				self.hb.set_show_close_button(False)
+				for child in self.hb.get_children():
+					child.hide()
+				self.hb.get_children()[0].show()
+				self.hb.get_children()[3].show()
+				self.hb.props.title = "Page 1 / 20"
+				self.hb.set_subtitle("")
+
+	def on_open_clicked (self, button):
+
+		self.popover.hide()
+
+		dialog = Gtk.FileChooserDialog ("Select PDF", button.get_toplevel(), Gtk.FileChooserAction.OPEN);
+		dialog.add_button (Gtk.STOCK_CANCEL, 0)
+		dialog.add_button (Gtk.STOCK_OPEN, 1)
+		dialog.set_default_response(1)
+
+		filefilter = Gtk.FileFilter();
+		filefilter.set_name("PDF files")
+		filefilter.add_mime_type("application/pdf")
+		dialog.set_filter(filefilter)
+
+		if dialog.run() == 1:
+
+			self.current_document = document(dialog.get_filename())
+
+			dialog.destroy()
+
+			self.hb.props.title = self.current_document.document_get_name()
+			self.hb.set_subtitle(self.current_document.document_get_directory())
+
+			self.iconview.set_sensitive(False)
+			self.spinnerbox.show()
+			t = Thread(target=self.testfunc, args=(self.current_document,))
+			t.daemon = True
+			t.start()
+
+
+	def update_progess(self, current_document, pagenum):
+		self.liststore.append([current_document.page_get_thumbnail(pagenum), "Label"])
+		return False
+
+	def quit_progress(self):
+		self.spinnerbox.hide()
+		self.iconview.set_sensitive(True)
+		return False
+
+	def testfunc(self, current_document):
+		for pagenum in range(0, current_document.document_get_pagecount()):
+			GLib.idle_add(self.update_progess, current_document, pagenum)
+			time.sleep(0.1)
+		GLib.idle_add(self.quit_progress)
+
+def main():
+	app = GUI()
+	Gtk.main()
+
+if __name__ == "__main__":
+    sys.exit(main())
+

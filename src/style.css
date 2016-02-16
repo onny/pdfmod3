@@ -1,0 +1,32 @@
+/* GtkIconView:insensitive {
+	opacity: 0.3;
+}
+
+GtkIconView {
+	opacity: 1;
+} */
+
+GtkIconView.cell:insensitive {
+	/* margin-top: 10px;
+	box-shadow: inset 0 1px 1px alpha(black, 0.1);
+	border-radius: 10px; */
+	/* transition: 200ms ease-in-out; */
+}
+
+GtkIconView.cell:hover {
+	/* margin-top: 10px;
+	box-shadow: inset 0 1px 1px alpha(black, 0.1);
+	border-radius: 10px; */
+	/* transition: 200ms ease-in-out; */
+	/* background-color: red; */
+	transition: 1s linear;
+}
+
+GtkIconView.cell {
+	/* margin-top: 10px;
+	box-shadow: inset 0 1px 1px alpha(black, 0.1);
+	border-radius: 10px; */
+	/* transition: 200ms ease-in-out; */
+	transition: 1s linear;
+	/* background-color: blue; */
+}
